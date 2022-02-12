@@ -165,11 +165,15 @@ mysqlDb()
 
 module.exports.handler = async function (event, context) {
     console.log(event.body);
-    const message = JSON.parse(event.body);
-    console.log(message);
-    await bot.handleUpdate(message);
+    try {
+        const message = JSON.parse(event.body);
+        await bot.handleUpdate(message);
+    } catch (err) {
+        console.log('Error on parse request body', JSON.parse(JSON.stringify(err)));
+    }
+
     return {
         statusCode: 200,
-        body: '',
+        body: 'Ok',
     };
 };
