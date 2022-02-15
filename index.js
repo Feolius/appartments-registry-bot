@@ -8,7 +8,7 @@ const http = require("http");
 
 function isPositiveInteger(str) {
     const n = Math.floor(Number(str));
-    return n !== Infinity && String(n) === str && n >= 0;
+    return n !== Infinity && String(n) === str && n > 0;
 }
 
 const transport = new transports.DailyRotateFile({
@@ -62,7 +62,7 @@ mysqlDb()
     .then(db => {
         bot.command('setapt', async (ctx) => {
             let aptNumber;
-            if (ctx.state.command.args.length > 0) {
+            if (ctx.state.command.args.length === 1) {
                 aptNumber = ctx.state.command.args[0];
                 if (!isPositiveInteger(aptNumber)) {
                     ctx.reply(`Номер квартиры должен быть числом. Желательно целым и больше нуля.☝️`);
@@ -145,7 +145,7 @@ mysqlDb()
         })
         bot.command('aptcontacts', async (ctx) => {
             let aptNumber;
-            if (ctx.state.command.args.length > 0) {
+            if (ctx.state.command.args.length === 1) {
                 aptNumber = ctx.state.command.args[0];
                 if (!isPositiveInteger(aptNumber)) {
                     ctx.reply(`Номер квартиры должен быть числом. Желательно целым и больше нуля.☝️`);
@@ -178,7 +178,7 @@ mysqlDb()
                 ctx.reply(GENERAL_ERROR_MSG);
             }
         })
-        bot.help((ctx) => ctx.reply(`Запомни, две команды. Всего лишь две.
+        bot.help((ctx) => ctx.reply(`Запомни две команды. Всего лишь две.
         /setapt *номер квартиры* - расскажешь всем, в какой квартире живешь
         /aptcontacts *номер квартиры* - узнаешь, кто живет в этой квартире
 Понятное дело, что в одной квартире может проживать несколько человек. Но никто не может проживать в двух квартирах сразу. Поэтому, выбирай свою квартиру с умом. 
