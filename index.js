@@ -1,10 +1,32 @@
+require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const mysqlDb = require('./mysql');
+const { createLogger, format, transports } = require('winston');
+const { combine, timestamp, label, prettyPrint } = format;
+require('winston-daily-rotate-file');
+const http = require("http");
 
 function isPositiveInteger(str) {
     const n = Math.floor(Number(str));
     return n !== Infinity && String(n) === str && n >= 0;
 }
+
+const transport = new transports.DailyRotateFile({
+    filename: 'logs/application-%DATE%.log',
+    datePattern: 'YYYY-MM-DD',
+    maxSize: '20m',
+    maxFiles: '14d'
+});
+
+const logger = createLogger({
+    format: combine(
+        timestamp(),
+        prettyPrint()
+    ),
+    transports: [
+        transport
+    ]
+});
 
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -34,6 +56,8 @@ bot.use((ctx, next) => {
     return next();
 });
 
+const GENERAL_ERROR_MSG = 'Соррян, что-то пошло не так😔';
+
 mysqlDb()
     .then(db => {
         bot.command('setapt', async (ctx) => {
@@ -41,21 +65,23 @@ mysqlDb()
             if (ctx.state.command.args.length > 0) {
                 aptNumber = ctx.state.command.args[0];
                 if (!isPositiveInteger(aptNumber)) {
-                    ctx.reply(`Apartment number is incorrect`);
+                    ctx.reply(`Номер квартиры должен быть числом. Желательно целым и больше нуля.☝️`);
                     return;
                 }
             } else {
-                ctx.reply(`Please provide apartment number`);
+                ctx.reply(`Ну и как мне понять, в какой квартире ты живешь?🙄`);
                 return;
             }
             if (ctx.update.message === undefined) {
-                ctx.reply(`Bot is used in wrong context`);
+                logger.error('Message object is absent in ctx : ' + ctx);
+                ctx.reply(`У меня ощущение, будто меня как-то неправильно используют🤔`);
                 return;
             }
             const chatId = ctx.update.message.chat.id;
             let username;
             if (ctx.update.message.from === undefined || ctx.update.message.from.username === undefined) {
-                ctx.reply(`Sorry bro, I cannot get your username`);
+                logger.error('Cannot determine username from ctx : ' + ctx);
+                ctx.reply(`Ой, а кто это у нас такой скрытный здесь?🤡Даже не понять, как тебя звать-то!`);
                 return;
             } else {
                 username = ctx.update.message.from.username;
@@ -77,8 +103,8 @@ mysqlDb()
                     });
                 });
             } catch (err) {
-                console.log('Error on attempt to find existing record', JSON.parse(JSON.stringify(err)));
-                ctx.reply(`Sorry bro, something went wrong:(`);
+                logger.error('Error on attempt to find existing record: ' + err);
+                ctx.reply(GENERAL_ERROR_MSG);
                 return;
             }
 
@@ -94,8 +120,8 @@ mysqlDb()
                         });
                     });
                 } catch (err) {
-                    console.log('Error on attempt to insert record', JSON.parse(JSON.stringify(err)));
-                    ctx.reply(`Sorry bro, something went wrong:(`);
+                    logger.error('Error on attempt to insert record ' + err);
+                    ctx.reply(GENERAL_ERROR_MSG);
                     return;
                 }
             } else {
@@ -110,23 +136,23 @@ mysqlDb()
                         })
                     });
                 } catch (err) {
-                    console.log('Error on attempt to update existing record', JSON.parse(JSON.stringify(err)));
-                    ctx.reply(`Sorry bro, something went wrong:(`);
+                    logger.error('Error on attempt to update existing record: ' + err);
+                    ctx.reply(GENERAL_ERROR_MSG);
                     return;
                 }
             }
-            ctx.reply(`Got it!`);
+            ctx.reply(`Понял-принял👍`);
         })
         bot.command('aptcontacts', async (ctx) => {
             let aptNumber;
             if (ctx.state.command.args.length > 0) {
                 aptNumber = ctx.state.command.args[0];
                 if (!isPositiveInteger(aptNumber)) {
-                    ctx.reply(`Apartment number is incorrect`);
+                    ctx.reply(`Номер квартиры должен быть числом. Желательно целым и больше нуля.☝️`);
                     return;
                 }
             } else {
-                ctx.reply(`Please provide apartment number`);
+                ctx.reply(`Назови номер квартиры, иначе чуда не случится🌈`);
                 return;
             }
             const chatId = ctx.update.message.chat.id;
@@ -144,36 +170,48 @@ mysqlDb()
                 if (contacts.length > 0) {
                     ctx.reply(contacts.map((contact) => `@${contact.username}`).join(', '));
                 } else {
-                    ctx.reply("Nobody lives here:)");
+                    ctx.reply("Здесь пока никто не живет. Но это не точно.🤓");
                 }
 
             } catch (err) {
-                console.log('Error on attempt to find existing record', JSON.parse(JSON.stringify(err)));
-                ctx.reply(`Sorry bro, something went wrong:(`);
+                logger.error('Error on attempt to find existing record:' + err);
+                ctx.reply(GENERAL_ERROR_MSG);
             }
         })
-        bot.start((ctx) => ctx.reply(`Hello. \nMy name Serverless Hello Teleram Bot \nI'm working on Cloud Function in the Yandex.Cloud.`))
-        bot.help((ctx) => ctx.reply(`Hello, ${ctx.message.from.username}.\nI can say Hello and nothing more`))
+        bot.help((ctx) => ctx.reply(`Запомни, две команды. Всего лишь две.
+        /setapt *номер квартиры* - расскажешь всем, в какой квартире живешь
+        /aptcontacts *номер квартиры* - узнаешь, кто живет в этой квартире
+Понятное дело, что в одной квартире может проживать несколько человек. Но никто не может проживать в двух квартирах сразу. Поэтому, выбирай свою квартиру с умом. 
+         `))
         bot.on('text', (ctx) => {
-            console.log('here');
-            ctx.reply(`test hadnler2`);
-
-
+            ctx.reply(`Не знаю, что ты имеешь ввиду🤷`);
         });
     })
-    .catch(error => console.log(error))
+    .catch(error => logger.error(JSON.parse(JSON.stringify(error))))
 
-module.exports.handler = async function (event, context) {
-    console.log(event.body);
-    try {
-        const message = JSON.parse(event.body);
-        await bot.handleUpdate(message);
-    } catch (err) {
-        console.log('Error on parse request body', JSON.parse(JSON.stringify(err)));
-    }
+const requestListener = function (req, res) {
+    let body = '';
+    req.on('data', chunk => {
+        body += chunk.toString();
+    });
+    req.on('end', async () => {
+        let message = null;
+        try {
+            message = JSON.parse(body);
+        } catch (err) {
+            logger.error('Error on parse request body:' + err);
+            res.end('ok')
+            return;
+        }
+        try {
+            await bot.handleUpdate(message);
+        } catch (err) {
+            logger.error('Error on handling request message: ' + err);
+        }
+        res.end('ok')
+    });
+    res.writeHead(200);
+}
 
-    return {
-        statusCode: 200,
-        body: 'Ok',
-    };
-};
+const server = http.createServer(requestListener);
+server.listen(3000, () => logger.info('Server is listening on port 3000'));
