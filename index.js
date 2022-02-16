@@ -73,24 +73,30 @@ mysqlDb()
                 return;
             }
             if (ctx.update.message === undefined) {
-                logger.error('Message object is absent in ctx : ' + ctx);
+                logger.error('Message object is absent in ctx:');
+                logger.error(JSON.parse(JSON.stringify(ctx)));
                 ctx.reply(`У меня ощущение, будто меня как-то неправильно используют🤔`);
                 return;
             }
             const chatId = ctx.update.message.chat.id;
-            let username;
-            if (ctx.update.message.from === undefined || ctx.update.message.from.username === undefined) {
-                logger.error('Cannot determine username from ctx : ' + ctx);
-                ctx.reply(`Ой, а кто это у нас такой скрытный здесь?🤡Даже не понять, как тебя звать-то!`);
-                return;
+            let username = null;
+            let userId;
+            if (ctx.update.message.from !== undefined) {
+                userId = ctx.update.message.from.id;
+                if (ctx.update.message.from.username !== undefined) {
+                    username = ctx.update.message.from.username;
+                }
             } else {
-                username = ctx.update.message.from.username;
+                logger.error('Cannot find sender user. ctx:');
+                logger.error(JSON.parse(JSON.stringify(ctx)));
+                ctx.reply(`Ой, а кто это у нас такой скрытный здесь?🤡Даже не понять, кто-ты! (ошибка в определении юзера)`);
+                return;
             }
 
             let id = null;
             try {
                 id = await new Promise((resolve, reject) => {
-                    db.query(`SELECT id FROM apartment_info WHERE chat_id = ? AND username = ?`, [chatId, username], (error, results) => {
+                    db.query(`SELECT id FROM apartment_info WHERE chat_id = ? AND user_id = ?`, [chatId, userId], (error, results) => {
                         if (error) {
                             reject(error);
                             return;
@@ -103,7 +109,8 @@ mysqlDb()
                     });
                 });
             } catch (err) {
-                logger.error('Error on attempt to find existing record: ' + err);
+                logger.error('Error on attempt to find existing record:');
+                logger.error(JSON.parse(JSON.stringify(err)));
                 ctx.reply(GENERAL_ERROR_MSG);
                 return;
             }
@@ -111,7 +118,7 @@ mysqlDb()
             if (id === null) {
                 try {
                     await new Promise((resolve, reject) => {
-                        db.query(`INSERT INTO apartment_info (username, chat_id, apartment_number) VALUES (?, ?, ?)`, [username, chatId, aptNumber], (error, results) => {
+                        db.query(`INSERT INTO apartment_info (user_id, username, chat_id, apartment_number) VALUES (?, ?, ?, ?)`, [userId, username, chatId, aptNumber], (error, results) => {
                             if (error) {
                                 reject(error);
                                 return;
@@ -120,14 +127,15 @@ mysqlDb()
                         });
                     });
                 } catch (err) {
-                    logger.error('Error on attempt to insert record ' + err);
+                    logger.error('Error on attempt to insert record:');
+                    logger.error(JSON.parse(JSON.stringify(err)));
                     ctx.reply(GENERAL_ERROR_MSG);
                     return;
                 }
             } else {
                 try {
                     await new Promise((resolve, reject) => {
-                        db.query(`UPDATE apartment_info SET apartment_number = ? WHERE id = ?`, [aptNumber, id], (error, results) => {
+                        db.query(`UPDATE apartment_info SET apartment_number = ?, username = ? WHERE id = ?`, [aptNumber, username, id], (error, results) => {
                             if (error) {
                                 reject(error);
                                 return;
@@ -136,7 +144,8 @@ mysqlDb()
                         })
                     });
                 } catch (err) {
-                    logger.error('Error on attempt to update existing record: ' + err);
+                    logger.error('Error on attempt to update existing record:');
+                    logger.error(JSON.parse(JSON.stringify(err)));
                     ctx.reply(GENERAL_ERROR_MSG);
                     return;
                 }
@@ -159,7 +168,7 @@ mysqlDb()
 
             try {
                 const contacts = await new Promise((resolve, reject) => {
-                    db.query(`SELECT username FROM apartment_info WHERE chat_id = ? AND apartment_number = ?`, [chatId, aptNumber], (error, results) => {
+                    db.query(`SELECT user_id, username FROM apartment_info WHERE chat_id = ? AND apartment_number = ?`, [chatId, aptNumber], (error, results) => {
                         if (error) {
                             reject(error);
                             return;
@@ -168,20 +177,28 @@ mysqlDb()
                     });
                 });
                 if (contacts.length > 0) {
-                    ctx.reply(contacts.map((contact) => `@${contact.username}`).join(', '));
+                    ctx.reply(contacts.map((contact) => {
+                        if (contact.username !== null) {
+                            return `[@${contact.username}](tg://user?id=${contact.user_id})`;
+                        } else {
+                            return `[без юзернейма](tg://user?id=${contact.user_id})`
+                        }
+                    }).join(', '), { parse_mode: 'MarkdownV2' });
                 } else {
                     ctx.reply("Здесь пока никто не живет. Но это не точно.🤓");
                 }
 
             } catch (err) {
-                logger.error('Error on attempt to find existing record:' + err);
+                logger.error('Error on attempt to find existing record:');
+                logger.error(JSON.parse(JSON.stringify(err)));
                 ctx.reply(GENERAL_ERROR_MSG);
             }
         })
         bot.help((ctx) => ctx.reply(`Запомни две команды. Всего лишь две.
         /setapt *номер квартиры* - расскажешь всем, в какой квартире живешь
         /aptcontacts *номер квартиры* - узнаешь, кто живет в этой квартире
-Понятное дело, что в одной квартире может проживать несколько человек. Но никто не может проживать в двух квартирах сразу. Поэтому, выбирай свою квартиру с умом. 
+Понятное дело, что в одной квартире может проживать несколько человек. Но никто не может проживать в двух квартирах сразу. Поэтому, выбирай свою квартиру с умом🤓 
+Повторная команда /setapt *номер квартиры* всегда перезапишет предыдущий номер.
          `))
         bot.on('text', (ctx) => {
             ctx.reply(`Не знаю, что ты имеешь ввиду🤷`);
@@ -199,14 +216,16 @@ const requestListener = function (req, res) {
         try {
             message = JSON.parse(body);
         } catch (err) {
-            logger.error('Error on parse request body:' + err);
+            logger.error('Error on parse request body:');
+            logger.error(JSON.parse(JSON.stringify(err)));
             res.end('ok')
             return;
         }
         try {
             await bot.handleUpdate(message);
         } catch (err) {
-            logger.error('Error on handling request message: ' + err);
+            logger.error('Error on handling request message: ');
+            logger.error(JSON.parse(JSON.stringify(err)));
         }
         res.end('ok')
     });

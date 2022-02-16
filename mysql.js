@@ -22,12 +22,13 @@ module.exports = () => {
             }
             connection.query(`CREATE TABLE IF NOT EXISTS apartment_info (
   id int(11) AUTO_INCREMENT PRIMARY KEY,
-  username varchar(32) NOT NULL,
+  user_id BIGINT NOT NULL,
+  username varchar(32) NULL,
   chat_id BIGINT NOT NULL,
   apartment_number int UNSIGNED NOT NULL,
     INDEX chat_id (chat_id),
     INDEX apartment_number (apartment_number),  
-    UNIQUE INDEX apartment_contact (username, chat_id)
+    UNIQUE INDEX user_chat (user_id, chat_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 `, (error, results) => {
                 if (error) {
