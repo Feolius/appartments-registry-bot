@@ -166,8 +166,9 @@ mysqlDb()
             }
             const chatId = ctx.update.message.chat.id;
 
+            let contacts = [];
             try {
-                const contacts = await new Promise((resolve, reject) => {
+                contacts = await new Promise((resolve, reject) => {
                     db.query(`SELECT user_id, username FROM apartment_info WHERE chat_id = ? AND apartment_number = ?`, [chatId, aptNumber], (error, results) => {
                         if (error) {
                             reject(error);
@@ -176,22 +177,21 @@ mysqlDb()
                         resolve(results);
                     });
                 });
-                if (contacts.length > 0) {
-                    ctx.reply(contacts.map((contact) => {
-                        if (contact.username !== null) {
-                            return `[@${contact.username}](tg://user?id=${contact.user_id})`;
-                        } else {
-                            return `[без юзернейма](tg://user?id=${contact.user_id})`
-                        }
-                    }).join(', '), { parse_mode: 'MarkdownV2' });
-                } else {
-                    ctx.reply("Здесь пока никто не живет. Но это не точно.🤓");
-                }
-
             } catch (err) {
                 logger.error('Error on attempt to find existing record:');
                 logger.error(JSON.parse(JSON.stringify(err)));
                 ctx.reply(GENERAL_ERROR_MSG);
+            }
+            if (contacts.length > 0) {
+                ctx.reply(contacts.map((contact) => {
+                    if (contact.username !== null) {
+                        return `[@${contact.username}](tg://user?id=${contact.user_id})`.replace(/_/g, "\\_");
+                    } else {
+                        return `[без юзернейма](tg://user?id=${contact.user_id})`
+                    }
+                }).join(', '), { parse_mode: 'MarkdownV2' });
+            } else {
+                ctx.reply("Здесь пока никто не живет. Но это не точно.🤓");
             }
         })
         bot.help((ctx) => ctx.reply(`Запомни две команды. Всего лишь две.
