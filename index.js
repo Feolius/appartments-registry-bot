@@ -6,10 +6,13 @@ const { combine, timestamp, label, prettyPrint } = format;
 require('winston-daily-rotate-file');
 const http = require("http");
 
+const MAX_MYSQL_UNSIGNED_INT = 4294967295;
+
 function isPositiveInteger(str) {
     const n = Math.floor(Number(str));
-    return n !== Infinity && String(n) === str && n > 0;
+    return n !== Infinity && String(n) === str && n > 0 && n < MAX_MYSQL_UNSIGNED_INT;
 }
+
 
 const transport = new transports.DailyRotateFile({
     filename: 'logs/application-%DATE%.log',
@@ -57,6 +60,9 @@ bot.use((ctx, next) => {
 });
 
 const GENERAL_ERROR_MSG = 'Соррян, что-то пошло не так😔';
+const SET_APT_QUESTION_MSG = 'Какая у тебя квартира? Ответь на это сообщение, нажав на него😌';
+const WRONG_APT_FORMAT_MSG =  `Номер квартиры должен быть числом. Желательно целым, больше нуля и адекватным (не больше ${MAX_MYSQL_UNSIGNED_INT})☝️`;
+const APT_CONTACTS_QUESTION_MSG = 'Какая квартира тебя интересует?😉Ответь на это сообщение, нажав на него😌'
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 const BATCH_MESSAGES_SEND_DELAY_MS = 2000;
 
@@ -72,18 +78,7 @@ mysqlDb()
             return next();
         })
 
-        bot.command('setapt', async (ctx) => {
-            let aptNumber;
-            if (ctx.state.command.args.length === 1) {
-                aptNumber = ctx.state.command.args[0];
-                if (!isPositiveInteger(aptNumber)) {
-                    ctx.reply(`Номер квартиры должен быть числом. Желательно целым и больше нуля.☝️`);
-                    return;
-                }
-            } else {
-                ctx.reply(`Ну и как мне понять, в какой квартире ты живешь?🙄`);
-                return;
-            }
+        const setAptHandler = async (ctx, aptNumber) => {
             if (ctx.update.message === undefined) {
                 logger.error('setapt: message object is absent in ctx:');
                 logger.error(JSON.parse(JSON.stringify(ctx)));
@@ -163,20 +158,9 @@ mysqlDb()
                 }
             }
             ctx.reply(`Понял-принял👍`);
-        })
+        }
 
-        bot.command('aptcontacts', async (ctx) => {
-            let aptNumber;
-            if (ctx.state.command.args.length === 1) {
-                aptNumber = ctx.state.command.args[0];
-                if (!isPositiveInteger(aptNumber)) {
-                    ctx.reply(`Номер квартиры должен быть числом. Желательно целым и больше нуля.☝️`);
-                    return;
-                }
-            } else {
-                ctx.reply(`Назови номер квартиры, иначе чуда не случится🌈`);
-                return;
-            }
+        const aptContactsHandler = async (ctx, aptNumber) => {
             const chatId = ctx.update.message.chat.id;
 
             let contacts = [];
@@ -200,6 +184,42 @@ mysqlDb()
             } else {
                 ctx.reply("Здесь пока никто не живет. Но это не точно.🤓");
             }
+        }
+
+        bot.command('setapt', async (ctx) => {
+            let aptNumber;
+            if (ctx.state.command.args.length === 1) {
+                aptNumber = ctx.state.command.args[0];
+                if (!isPositiveInteger(aptNumber)) {
+                    ctx.reply(WRONG_APT_FORMAT_MSG);
+                    return;
+                }
+            } else if(ctx.state.command.args.length === 0) {
+                ctx.reply(SET_APT_QUESTION_MSG);
+                return;
+            } else {
+                ctx.reply(`Ну и как мне понять, в какой квартире ты живешь?🙄`);
+                return;
+            }
+            await setAptHandler(ctx, aptNumber);
+        })
+
+        bot.command('aptcontacts', async (ctx) => {
+            let aptNumber;
+            if (ctx.state.command.args.length === 1) {
+                aptNumber = ctx.state.command.args[0];
+                if (!isPositiveInteger(aptNumber)) {
+                    ctx.reply(WRONG_APT_FORMAT_MSG);
+                    return;
+                }
+            } else if(ctx.state.command.args.length === 0) {
+                ctx.reply(APT_CONTACTS_QUESTION_MSG);
+                return;
+            } else {
+                ctx.reply(`Назови номер квартиры, иначе чуда не случится🌈`);
+                return;
+            }
+            await aptContactsHandler(ctx, aptNumber);
         })
 
         bot.command('aptslist', async (ctx) => {
@@ -311,7 +331,32 @@ mysqlDb()
         /delme - удалит запись о тебе, если ты решил переехать или просто покинуть чат`;
         bot.start((ctx) => ctx.reply(helpText));
         bot.help((ctx) => ctx.reply(helpText))
-        bot.on('text', (ctx) => {
+
+        bot.on('text', async (ctx) => {
+            if (ctx.update.message !== undefined &&
+                ctx.update.message.reply_to_message !== undefined &&
+                ctx.update.message.reply_to_message.text !== undefined) {
+                switch (ctx.update.message.reply_to_message.text) {
+                    case SET_APT_QUESTION_MSG:
+                        if (isPositiveInteger(ctx.update.message.text)) {
+                            await setAptHandler(ctx, ctx.update.message.text);
+                            return;
+                        } else {
+                            ctx.reply(WRONG_APT_FORMAT_MSG);
+                            return;
+                        }
+                    case APT_CONTACTS_QUESTION_MSG:
+                        if (isPositiveInteger(ctx.update.message.text)) {
+                            await aptContactsHandler(ctx, ctx.update.message.text);
+                            return;
+                        } else {
+                            ctx.reply(WRONG_APT_FORMAT_MSG);
+                            return;
+                        }
+                    default:
+                }
+
+            }
             ctx.reply(`Не знаю, что ты имеешь ввиду🤷`);
         });
     })
@@ -328,7 +373,7 @@ const renderContact = (contact) => {
 const renderContacts = (contacts) => contacts.map((contact) => renderContact(contact)).join(', ');
 
 const buildAptListMessages = (contacts) => {
-    return buildTgMessages(buildAptListLines(contacts));
+    return splitIntoTgMessages(buildAptListLines(contacts));
 }
 
 const buildAptListLines = (contacts) => {
@@ -355,7 +400,7 @@ const buildAptListLines = (contacts) => {
     return aptMessageLines;
 }
 
-const buildTgMessages = (lines) => {
+const splitIntoTgMessages = (lines) => {
     const messages = [];
     let currentMessageLength = 0;
     let messageRowStartIndex = 0;
